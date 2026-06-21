@@ -35,34 +35,32 @@ app.use('/api/auth', authRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 
-// Production: Frontend static dosyalarını serve et
-if (env.NODE_ENV === 'production') {
+// Frontend static dosyalarını serve et (dist varsa)
+{
   const fs = require('fs');
-  // Olası frontend dizinleri
   const possiblePaths = [
     path.join(__dirname, '../../frontend/dist'),
     path.join(process.cwd(), '../frontend/dist'),
-    path.join(process.cwd(), 'frontend/dist'),
     '/app/frontend/dist',
   ];
   
+  console.log(`📊 NODE_ENV: ${env.NODE_ENV}, CWD: ${process.cwd()}, __dirname: ${__dirname}`);
+  
   let frontendPath = '';
   for (const p of possiblePaths) {
-    console.log(`📂 Frontend path kontrol: ${p} → ${fs.existsSync(p)}`);
-    if (fs.existsSync(p)) {
-      frontendPath = p;
-      break;
-    }
+    const exists = fs.existsSync(p);
+    console.log(`📂 ${p} → ${exists}`);
+    if (exists) { frontendPath = p; break; }
   }
 
   if (frontendPath) {
-    console.log(`✅ Frontend serve ediliyor: ${frontendPath}`);
+    console.log(`✅ Frontend serve: ${frontendPath}`);
     app.use(express.static(frontendPath));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(frontendPath, 'index.html'));
     });
   } else {
-    console.error('❌ Frontend dist bulunamadı!');
+    console.warn('⚠️ Frontend dist bulunamadı — sadece API çalışıyor');
   }
 }
 
