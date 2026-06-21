@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Database
+backend/prisma/*.db
+backend/prisma/*.db-journal
+
+# Build
+dist/
+build/
+
+# WhatsApp session
+.wwebjs_auth/
+.wwebjs_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/

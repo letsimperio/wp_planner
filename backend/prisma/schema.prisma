@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  phone         String?  @unique
+  geminiApiKey   String?  @map("gemini_api_key")
+  dayStartTime   String?  @map("day_start_time")   // "09:00"
+  dayEndTime     String?  @map("day_end_time")     // "18:00"
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  tasks          Task[]
+
+  @@map("users")
+}
+
+model Task {
+  id                 String   @id @default(uuid())
+  userId             String   @map("user_id")
+  title              String
+  description        String?
+  status             String   @default("PENDING")
+  priority           String   @default("MEDIUM")
+  repeatType         String   @default("ONCE") @map("repeat_type")
+  repeatIntervalDays Int?     @map("repeat_interval_days")
+  lastCompletedAt    DateTime? @map("last_completed_at")
+  nextDueAt          DateTime? @map("next_due_at")
+  deadlineAt         DateTime? @map("deadline_at")     // Kesin bitiş tarihi
+  isFlexible         Boolean   @default(false) @map("is_flexible") // Esnek görev?
+  dueTime            String?   @map("due_time")  // "16:00" — saatli görevler
+  location           String?   // "Kadıköy", "Ofis" — konum bazlı görevler
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([nextDueAt])
+  @@index([status])
+  @@map("tasks")
+}
