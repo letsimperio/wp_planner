@@ -40,10 +40,12 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 # Data dizini (SQLite + Baileys auth)
 RUN mkdir -p /app/backend/data
 
+WORKDIR /app/backend
+
 ENV NODE_ENV=production
 ENV PORT=3000
 
 EXPOSE 3000
 
 # Prisma migrate + start
-CMD ["sh", "-c", "cd /app/backend && npx prisma migrate deploy && node dist/index.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
