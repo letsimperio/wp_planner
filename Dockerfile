@@ -40,7 +40,6 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 WORKDIR /app/backend
 
 ENV NODE_ENV=production
-ENV PORT=3000
 
 EXPOSE 3000
 

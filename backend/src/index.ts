@@ -16,7 +16,7 @@ app.use(helmet({
   contentSecurityPolicy: false, // React SPA için CSP devre dışı
 }));
 app.use(cors({
-  origin: env.FRONTEND_URL,
+  origin: env.NODE_ENV === 'production' ? true : env.FRONTEND_URL,
   credentials: true,
 }));
 app.use(express.json());
