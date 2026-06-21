@@ -7,10 +7,16 @@ import Dashboard from './pages/Dashboard';
 import Tasks from './pages/Tasks';
 import CalendarPage from './pages/Calendar';
 import Settings from './pages/Settings';
+import Setup from './pages/Setup';
 import './index.css';
 
+const isSetupComplete = (user: any): boolean => {
+  if (!user) return false;
+  return !!(user.geminiApiKey && user.phone && user.dayStartTime && user.dayEndTime);
+};
+
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { token, loading } = useAuth();
+  const { token, user, loading } = useAuth();
 
   if (loading) {
     return (
@@ -22,6 +28,34 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
   if (!token) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Setup tamamlanmadıysa setup'a yönlendir
+  if (!isSetupComplete(user)) {
+    return <Navigate to="/setup" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+const SetupRoute = ({ children }: { children: React.ReactNode }) => {
+  const { token, user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="loading-page">
+        <div className="loading-spinner" />
+      </div>
+    );
+  }
+
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Setup zaten tamamlandıysa dashboard'a yönlendir
+  if (isSetupComplete(user)) {
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;
@@ -58,6 +92,7 @@ const AppRoutes = () => (
   <Routes>
     <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
     <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
+    <Route path="/setup" element={<SetupRoute><Setup /></SetupRoute>} />
     <Route path="/" element={
       <ProtectedRoute>
         <AppLayout><Dashboard /></AppLayout>

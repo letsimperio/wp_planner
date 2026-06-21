@@ -58,4 +58,22 @@ export class AuthController {
       res.status(400).json({ error: error.message });
     }
   }
+
+  static async testGeminiKey(req: Request, res: Response): Promise<void> {
+    try {
+      const { apiKey } = req.body;
+      if (!apiKey) {
+        res.status(400).json({ error: 'API key gerekli' });
+        return;
+      }
+
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+      await model.generateContent('test');
+      res.json({ valid: true });
+    } catch (error: any) {
+      res.status(400).json({ valid: false, error: 'Geçersiz API key' });
+    }
+  }
 }
