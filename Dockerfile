@@ -47,5 +47,5 @@ ENV PORT=3000
 
 EXPOSE 3000
 
-# Prisma migrate + start
-CMD ["sh", "-c", "mkdir -p data && npx prisma migrate deploy && node dist/index.js"]
+# DB oluştur + start
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss && node dist/index.js"]
