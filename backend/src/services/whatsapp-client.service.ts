@@ -16,13 +16,14 @@ import pino from 'pino';
 type RepeatType = 'ONCE' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'INTERVAL';
 
 const AUTH_DIR = path.join(process.cwd(), '.baileys_auth');
-const logger = pino({ level: 'silent' }); // Baileys logları sessiz
+const logger = pino({ level: 'warn' }); // Hata ve uyarıları göster
 
 let sock: WASocket | null = null;
 
 export class WhatsAppClientService {
   private static isReady = false;
   private static myJid = '';        // Kendi JID'imiz (905xx@s.whatsapp.net)
+  private static myLid = '';        // Self-chat LID (43684xxx@lid)
   private static currentQr = '';    // QR code data URL for frontend
   private static qrTimestamp = 0;
 
@@ -49,17 +50,23 @@ export class WhatsAppClientService {
       sock = null;
     }
 
+    // WhatsApp protokol versiyonunu çek (405 hatasını önler)
+    const { fetchLatestBaileysVersion } = await import('@whiskeysockets/baileys');
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    console.log(`📦 Baileys versiyon: ${version.join('.')} (güncel: ${isLatest})`);
+
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
     sock = makeWASocket({
+      version,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
-      printQRInTerminal: true,
       logger,
-      browser: ['WP Planner', 'Chrome', '1.0.0'],
-      generateHighQualityLinkPreview: false,
+      browser: ['WP Planner', 'Safari', '3.0'],
+      syncFullHistory: false,
+      markOnlineOnConnect: false,
     });
 
     // QR kodu geldiğinde sakla
@@ -96,11 +103,15 @@ export class WhatsAppClientService {
         WhatsAppClientService.isReady = true;
         WhatsAppClientService.currentQr = '';
         WhatsAppClientService.myJid = sock?.user?.id || '';
-        // JID normalize: 905xx:xx@s.whatsapp.net → 905xx@s.whatsapp.net
         if (WhatsAppClientService.myJid.includes(':')) {
           WhatsAppClientService.myJid = WhatsAppClientService.myJid.split(':')[0] + '@s.whatsapp.net';
         }
-        console.log(`✅ WhatsApp bağlantısı hazır! (${WhatsAppClientService.myJid})`);
+        // Self-chat LID'i al
+        WhatsAppClientService.myLid = (sock?.user as any)?.lid || '';
+        if (WhatsAppClientService.myLid.includes(':')) {
+          WhatsAppClientService.myLid = WhatsAppClientService.myLid.split(':')[0] + '@lid';
+        }
+        console.log(`✅ WhatsApp bağlantısı hazır! (${WhatsAppClientService.myJid}, LID: ${WhatsAppClientService.myLid})`);
       }
     });
 
@@ -109,34 +120,31 @@ export class WhatsAppClientService {
 
     // Mesajları dinle
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
+      // Sadece notify: append = botun kendi gönderdiği mesajlar (echo) → atla
       if (type !== 'notify') return;
 
       for (const msg of messages) {
         try {
-          // Boş mesaj veya status/broadcast atla
-          if (!msg.message) continue;
-          if (msg.key.remoteJid === 'status@broadcast') continue;
-          if (msg.key.remoteJid?.endsWith('@g.us')) continue;
-
-          // Sadece self-chat: kendimize attığımız mesajlar
-          // fromMe=true VE remoteJid kendi numaramız olmalı
-          if (!msg.key.fromMe) continue;
-
-          // Mesaj metnini al
-          const text = msg.message.conversation
-            || msg.message.extendedTextMessage?.text
+          const remoteJid = msg.key.remoteJid || '';
+          const text = msg.message?.conversation
+            || msg.message?.extendedTextMessage?.text
             || '';
 
+          // Boş mesaj veya status/broadcast/grup atla
+          if (!msg.message) continue;
+          if (remoteJid === 'status@broadcast') continue;
+          if (remoteJid.endsWith('@g.us')) continue;
           if (!text || text.trim().length === 0) continue;
-          if (text.startsWith('|')) continue; // Bot cevapları
 
-          const remoteJid = msg.key.remoteJid || '';
-          // Self-chat kontrolü: kendimize mi yazdık?
+          // Self-chat kontrolü: remoteJid kendi numara VEYA LID ile eşleşmeli
           const myNumber = WhatsAppClientService.myJid.split('@')[0];
+          const myLidNumber = WhatsAppClientService.myLid.split('@')[0];
           const remoteNumber = remoteJid.split('@')[0];
-          if (myNumber !== remoteNumber) continue;
+          const isSelfChat = (myNumber === remoteNumber) || (myLidNumber && myLidNumber === remoteNumber);
+          if (!isSelfChat) continue;
 
           console.log(`📨 Mesaj: ${text}`);
+          // handleMessage'a gerçek telefon numarası geç (LID değil)
           await WhatsAppClientService.handleMessage(remoteJid, text);
         } catch (err: any) {
           console.error('❌ Mesaj işleme hatası:', err.message);
@@ -232,7 +240,8 @@ export class WhatsAppClientService {
 
   private static async handleMessage(jid: string, text: string): Promise<void> {
     try {
-      const phone = jid.split('@')[0];
+      // Self-chat'te jid LID formatında olabilir, gerçek telefon numarasını myJid'den al
+      const phone = WhatsAppClientService.myJid.split('@')[0];
       console.log(`📱 WhatsApp mesajı alındı: ${phone} → ${text}`);
 
       // Check pending interval question
@@ -303,6 +312,9 @@ export class WhatsAppClientService {
         : '';
 
       WhatsAppClientService.addToHistory(phone, 'user', text);
+
+      // Kullanıcıya "düşünüyorum" mesajı at
+      if (sock) await sock.sendMessage(jid, { text: '🤔 _Düşünüyorum..._' });
 
       const action = await GeminiService.parseMessage(text, user.geminiApiKey, {
         history: history || undefined,

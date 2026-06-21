@@ -120,7 +120,7 @@ export class TaskService {
     }
 
     // Recurring task: calculate next due date
-    const nextDueAt = this.calculateNextDueDate(task.repeatType, task.repeatIntervalDays, now);
+    const nextDueAt = this.calculateNextDueDate(task.repeatType as RepeatType, task.repeatIntervalDays, now);
 
     return prisma.task.update({
       where: { id: taskId },
