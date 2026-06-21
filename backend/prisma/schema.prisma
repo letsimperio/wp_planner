@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -14,8 +14,8 @@ model User {
   password  String
   phone         String?  @unique
   geminiApiKey   String?  @map("gemini_api_key")
-  dayStartTime   String?  @map("day_start_time")   // "09:00"
-  dayEndTime     String?  @map("day_end_time")     // "18:00"
+  dayStartTime   String?  @map("day_start_time")
+  dayEndTime     String?  @map("day_end_time")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
   tasks          Task[]
@@ -27,17 +27,17 @@ model Task {
   id                 String   @id @default(uuid())
   userId             String   @map("user_id")
   title              String
-  description        String?
+  description        String?  @db.Text
   status             String   @default("PENDING")
   priority           String   @default("MEDIUM")
   repeatType         String   @default("ONCE") @map("repeat_type")
   repeatIntervalDays Int?     @map("repeat_interval_days")
   lastCompletedAt    DateTime? @map("last_completed_at")
   nextDueAt          DateTime? @map("next_due_at")
-  deadlineAt         DateTime? @map("deadline_at")     // Kesin bitiş tarihi
-  isFlexible         Boolean   @default(false) @map("is_flexible") // Esnek görev?
-  dueTime            String?   @map("due_time")  // "16:00" — saatli görevler
-  location           String?   // "Kadıköy", "Ofis" — konum bazlı görevler
+  deadlineAt         DateTime? @map("deadline_at")
+  isFlexible         Boolean   @default(false) @map("is_flexible")
+  dueTime            String?   @map("due_time")
+  location           String?
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 

@@ -34,11 +34,8 @@ COPY --from=backend-builder /app/backend/node_modules ./backend/node_modules
 COPY --from=backend-builder /app/backend/package*.json ./backend/
 COPY --from=backend-builder /app/backend/prisma ./backend/prisma
 
-# Frontend (static files — backend serves these)
+# Frontend (static files)
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
-
-# Data dizini (SQLite + Baileys auth — volume mount noktası)
-RUN mkdir -p /app/backend/data
 
 WORKDIR /app/backend
 
@@ -47,5 +44,4 @@ ENV PORT=3000
 
 EXPOSE 3000
 
-# DB oluştur + start
 CMD ["sh", "-c", "npx prisma db push --accept-data-loss && node dist/index.js"]
