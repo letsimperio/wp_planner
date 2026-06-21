@@ -1,0 +1,24 @@
+node_modules
+.git
+.gitignore
+*.md
+.env
+.env.*
+!.env.example
+
+# Backend
+backend/node_modules
+backend/dist
+backend/.baileys_auth
+backend/data
+backend/.env
+
+# Frontend
+frontend/node_modules
+frontend/dist
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
