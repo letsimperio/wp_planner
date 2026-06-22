@@ -469,24 +469,44 @@ export class WhatsAppClientService {
             let tasksToList = tasks;
             if (action.date) {
               const targetDate = new Date(action.date);
+              targetDate.setHours(0, 0, 0, 0);
+
+              // Tüm aktif görevleri al (tasks sadece PENDING olanları içeriyor)
               tasksToList = tasks.filter((t) => {
                 if (!t.nextDueAt) return false;
                 const taskDate = new Date(t.nextDueAt);
-                return taskDate.getFullYear() === targetDate.getFullYear() &&
-                       taskDate.getMonth() === targetDate.getMonth() &&
-                       taskDate.getDate() === targetDate.getDate();
+                taskDate.setHours(0, 0, 0, 0);
+
+                // Tam tarih eşleşmesi
+                if (taskDate.getTime() === targetDate.getTime()) return true;
+
+                // Tekrarlanan görevler — o tarihe düşüyor mu?
+                const rt = (t as any).repeatType;
+                if (rt === 'DAILY') return true;  // Her gün geçerli
+                if (rt === 'WEEKLY' && taskDate.getDay() === targetDate.getDay()) return true;
+                if (rt === 'MONTHLY' && taskDate.getDate() === targetDate.getDate()) return true;
+                if (rt === 'INTERVAL' && (t as any).repeatIntervalDays) {
+                  const diff = Math.abs(targetDate.getTime() - taskDate.getTime());
+                  const days = Math.round(diff / (1000 * 60 * 60 * 24));
+                  if (days % (t as any).repeatIntervalDays === 0) return true;
+                }
+
+                return false;
               });
             }
             if (tasksToList.length === 0) {
-              await WhatsAppClientService.reply(jid, phone, '📭 Bekleyen göreviniz yok!');
+              const dateLabel = action.date ? new Date(action.date).toLocaleDateString('tr-TR') : '';
+              await WhatsAppClientService.reply(jid, phone, `📭 ${dateLabel ? `${dateLabel} için ` : ''}Bekleyen göreviniz yok!`);
               break;
             }
-            let lReply = `📋 *Görevleriniz*\n\n`;
+            const dateLabel = action.date ? `*${new Date(action.date).toLocaleDateString('tr-TR')}* — ` : '';
+            let lReply = `📋 ${dateLabel}*Görevleriniz*\n\n`;
             tasksToList.forEach((t, i) => {
               const date = t.nextDueAt ? t.nextDueAt.toLocaleDateString('tr-TR') : 'Tarih yok';
               const time = (t as any).dueTime ? ` ⏰${(t as any).dueTime}` : '';
               const loc = (t as any).location ? ` 📍${(t as any).location}` : '';
-              lReply += `${i + 1}. ${t.title} — ${date}${time}${loc}\n`;
+              const repeat = (t as any).repeatType && (t as any).repeatType !== 'ONCE' ? ` 🔁` : '';
+              lReply += `${i + 1}. ${t.title} — ${date}${time}${loc}${repeat}\n`;
             });
             await WhatsAppClientService.reply(jid, phone, lReply);
             break;
