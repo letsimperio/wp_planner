@@ -407,14 +407,15 @@ export class WhatsAppClientService {
             }
 
             // Normal görev
-            nextDueAt = action.date ? new Date(action.date) : new Date();
-            if (action.time) {
+            nextDueAt = action.date ? new Date(action.date) : (undefined as unknown as Date);
+            if (nextDueAt && action.time) {
               const [h, m] = action.time.split(':').map(Number);
               nextDueAt.setHours(h, m, 0, 0);
             }
             const task = await TaskService.create({
               userId: user.id, title: action.title, repeatType,
-              repeatIntervalDays: action.repeatIntervalDays || undefined, nextDueAt,
+              repeatIntervalDays: action.repeatIntervalDays || undefined,
+              nextDueAt: action.date ? nextDueAt : undefined,
             });
             if (action.time || action.location) {
               await prisma.task.update({
@@ -424,7 +425,9 @@ export class WhatsAppClientService {
                 },
               });
             }
-            let reply = `✅ Görev oluşturuldu!\n\n*${task.title}*`;
+            let reply = action.date
+              ? `✅ Görev oluşturuldu!\n\n*${task.title}*`
+              : `📌 Zamansız görev eklendi!\n\n*${task.title}*\n⏳ Zamanı gelince yapılacak`;
             if (repeatType !== 'ONCE') reply += `\n🔁 ${getRepeatLabel(repeatType, action.repeatIntervalDays)}`;
             if (action.date) reply += `\n📅 ${new Date(action.date).toLocaleDateString('tr-TR')}`;
             if (action.time) reply += `\n⏰ Saat: ${action.time}`;
@@ -467,22 +470,24 @@ export class WhatsAppClientService {
 
           case 'list_tasks': {
             let tasksToList = tasks;
-            if (action.date) {
+            let listTitle = '*Görevleriniz*';
+
+            if (action.date === 'TIMELESS') {
+              // Zamansız görevler
+              tasksToList = tasks.filter(t => !t.nextDueAt);
+              listTitle = '*Zamansız Görevleriniz* ⏳';
+            } else if (action.date) {
               const targetDate = new Date(action.date);
               targetDate.setHours(0, 0, 0, 0);
+              listTitle = `*${targetDate.toLocaleDateString('tr-TR')}* — *Görevleriniz*`;
 
-              // Tüm aktif görevleri al (tasks sadece PENDING olanları içeriyor)
               tasksToList = tasks.filter((t) => {
                 if (!t.nextDueAt) return false;
                 const taskDate = new Date(t.nextDueAt);
                 taskDate.setHours(0, 0, 0, 0);
-
-                // Tam tarih eşleşmesi
                 if (taskDate.getTime() === targetDate.getTime()) return true;
-
-                // Tekrarlanan görevler — o tarihe düşüyor mu?
                 const rt = (t as any).repeatType;
-                if (rt === 'DAILY') return true;  // Her gün geçerli
+                if (rt === 'DAILY') return true;
                 if (rt === 'WEEKLY' && taskDate.getDay() === targetDate.getDay()) return true;
                 if (rt === 'MONTHLY' && taskDate.getDate() === targetDate.getDate()) return true;
                 if (rt === 'INTERVAL' && (t as any).repeatIntervalDays) {
@@ -490,24 +495,36 @@ export class WhatsAppClientService {
                   const days = Math.round(diff / (1000 * 60 * 60 * 24));
                   if (days % (t as any).repeatIntervalDays === 0) return true;
                 }
-
                 return false;
               });
             }
+
+            // Zamansız görevleri de say olarak belirt
+            const timelessCount = tasks.filter(t => !t.nextDueAt).length;
+
             if (tasksToList.length === 0) {
-              const dateLabel = action.date ? new Date(action.date).toLocaleDateString('tr-TR') : '';
-              await WhatsAppClientService.reply(jid, phone, `📭 ${dateLabel ? `${dateLabel} için ` : ''}Bekleyen göreviniz yok!`);
+              let emptyMsg = `📭 ${action.date && action.date !== 'TIMELESS' ? `${new Date(action.date).toLocaleDateString('tr-TR')} için ` : ''}Bekleyen göreviniz yok!`;
+              if (action.date !== 'TIMELESS' && timelessCount > 0) {
+                emptyMsg += `\n\n📌 ${timelessCount} zamansız göreviniz var. "zamansız görevlerim" yazarak görebilirsiniz.`;
+              }
+              await WhatsAppClientService.reply(jid, phone, emptyMsg);
               break;
             }
-            const dateLabel = action.date ? `*${new Date(action.date).toLocaleDateString('tr-TR')}* — ` : '';
-            let lReply = `📋 ${dateLabel}*Görevleriniz*\n\n`;
+
+            let lReply = `📋 ${listTitle}\n\n`;
             tasksToList.forEach((t, i) => {
-              const date = t.nextDueAt ? t.nextDueAt.toLocaleDateString('tr-TR') : 'Tarih yok';
+              const date = t.nextDueAt ? t.nextDueAt.toLocaleDateString('tr-TR') : '⏳ Zamansız';
               const time = (t as any).dueTime ? ` ⏰${(t as any).dueTime}` : '';
               const loc = (t as any).location ? ` 📍${(t as any).location}` : '';
               const repeat = (t as any).repeatType && (t as any).repeatType !== 'ONCE' ? ` 🔁` : '';
               lReply += `${i + 1}. ${t.title} — ${date}${time}${loc}${repeat}\n`;
             });
+
+            // Zamansız görev sayısını dipnot olarak ekle (tarihli liste gösterilirken)
+            if (action.date !== 'TIMELESS' && timelessCount > 0) {
+              lReply += `\n📌 Ayrıca ${timelessCount} zamansız görev var. "zamansız görevlerim" yazın.`;
+            }
+
             await WhatsAppClientService.reply(jid, phone, lReply);
             break;
           }

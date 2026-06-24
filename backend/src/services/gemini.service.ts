@@ -37,6 +37,8 @@ AKSIYON TİPLERİ:
 - Net bir görev varsa kullan
 - Birden fazla tarih varsa HER TARİH İÇİN AYRI create_task oluştur
 - Örn: "1-2-3 temmuz direksiyon eğitimi" → 3 ayrı create_task
+- ZAMANSIZ GÖREVLER: "bir ara", "fırsatını bulunca", "bir gün", "zamanı gelince", "ne zaman olsa" gibi belirsiz ifadeler varsa date: null ve time: null bırak. Bu görevler zamansız listesine eklenir.
+- Mesajda tarih/saat BELİRTİLMEMİŞ ve görev doğası gereği acil DEĞİLSE (ör: "şuraya git", "bunu al", "şunu araştır") → date: null bırak
 
 ✅ complete_task — Görev tamamla
 - "1 bitti", "ilk görev tamam", "2. tamamlandı" → taskNumber alanını doldur (1, 2, 3...)
@@ -45,6 +47,7 @@ AKSIYON TİPLERİ:
 
 ✅ list_tasks — Görevleri listele
 - "görevlerimi listele", "bugün ne var", "yarın ne var"
+- "zamansız görevlerim", "bir ara yapılacaklar", "zamansız listesi" → date alanına "TIMELESS" yaz
 
 ✅ ask_clarification — Eksik bilgi sor
 - Tarih/saat var ama AÇIKLAMA YOK → "Bu tarihte ne işiniz var?" diye sor
@@ -111,6 +114,15 @@ Kullanıcı: "Kadıköy'de fatura öde"
 
 Kullanıcı: "görevlerimi listele"
 → {"actions":[{"action":"list_tasks","title":"","taskNumber":null,"repeatType":"","repeatIntervalDays":null,"date":null,"time":null,"needsInterval":false,"isFlexible":false,"deadlineDays":null,"location":null,"question":null,"reply":null}]}
+
+Kullanıcı: "bir ara Kadıköy'e gidip fatura öde"
+→ {"actions":[{"action":"create_task","title":"Kadıköy'e gidip fatura öde","taskNumber":null,"repeatType":"ONCE","repeatIntervalDays":null,"date":null,"time":null,"needsInterval":false,"isFlexible":false,"deadlineDays":null,"location":"Kadıköy","question":null,"reply":null}]}
+
+Kullanıcı: "fırsatını bulunca araba yıkat"
+→ {"actions":[{"action":"create_task","title":"Araba yıkat","taskNumber":null,"repeatType":"ONCE","repeatIntervalDays":null,"date":null,"time":null,"needsInterval":false,"isFlexible":false,"deadlineDays":null,"location":null,"question":null,"reply":null}]}
+
+Kullanıcı: "zamansız görevlerim ne"
+→ {"actions":[{"action":"list_tasks","title":"","taskNumber":null,"repeatType":"","repeatIntervalDays":null,"date":"TIMELESS","time":null,"needsInterval":false,"isFlexible":false,"deadlineDays":null,"location":null,"question":null,"reply":null}]}
 
 Bugünün tarihi: CURRENT_DATE
 Bugün haftanın günü: CURRENT_DAY_NAME`;
