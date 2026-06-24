@@ -228,4 +228,134 @@ export class GeminiService {
       };
     }
   }
+
+  // ==================== MEDIA ANALYSIS ====================
+
+  static async parseMedia(
+    mediaBuffer: Buffer,
+    mimeType: string,
+    userApiKey?: string | null,
+    caption?: string,
+  ): Promise<GeminiResponse> {
+    try {
+      const genAI = userApiKey
+        ? new GoogleGenerativeAI(userApiKey)
+        : this.defaultGenAI;
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      const dayNames = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+      const currentDayName = dayNames[now.getDay()];
+
+      const isAudio = mimeType.startsWith('audio/');
+      const mediaType = isAudio ? 'ses kaydı' : 'resim/fotoğraf';
+
+      const mediaPrompt = `Sen bir görev yönetim asistanısın. Kullanıcı sana bir ${mediaType} gönderdi.
+
+Bu ${mediaType}'ı analiz et ve içinden çıkarılabilecek görevleri bul.
+
+${isAudio ? `
+SES KAYDI KURALLARI:
+- Ses kaydını dikkatlice dinle/analiz et
+- Kullanıcının söylediği görevleri, randevuları, hatırlatmaları çıkar
+- Belirsiz ifadeleri de görev olarak çıkar
+` : `
+RESİM KURALLARI:
+- Fotoğrafta yazı varsa (not, yapışkan kağıt, tahta, ekran görüntüsü) → yazıları oku ve görev çıkar
+- Liste varsa her maddeyi ayrı görev yap
+- Takvim/ajanda fotoğrafı ise tarihli görevler çıkar
+- Etiket/kartvizit ise ilgili görev çıkar (örn: "X'i ara")
+`}
+
+${caption ? `Kullanıcının eklediği açıklama: "${caption}"` : ''}
+
+SADECE JSON döndür. Her çıkarılan görev için ayrı create_task oluştur:
+{
+  "actions": [
+    {
+      "action": "create_task",
+      "title": "görev başlığı",
+      "taskNumber": null,
+      "repeatType": "ONCE",
+      "repeatIntervalDays": null,
+      "date": null veya "YYYY-MM-DD",
+      "time": null veya "HH:mm",
+      "needsInterval": false,
+      "isFlexible": false,
+      "deadlineDays": null,
+      "location": null veya "konum",
+      "question": null,
+      "reply": null
+    }
+  ]
+}
+
+Eğer hiçbir görev çıkaramıyorsan:
+{"actions":[{"action":"chat","title":"","taskNumber":null,"repeatType":"","repeatIntervalDays":null,"date":null,"time":null,"needsInterval":false,"isFlexible":false,"deadlineDays":null,"location":null,"question":null,"reply":"Bu ${mediaType}'dan görev çıkaramadım. İçeriği anlatır mısınız?"}]}
+
+Bugünün tarihi: ${today}
+Bugün: ${currentDayName}`;
+
+      const base64Data = mediaBuffer.toString('base64');
+
+      const result = await model.generateContent({
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { inlineData: { mimeType, data: base64Data } },
+              { text: mediaPrompt },
+            ],
+          },
+        ],
+      });
+
+      const responseText = result.response.text().trim();
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('Gemini medya yanıtından JSON çıkarılamadı');
+
+      const parsed = JSON.parse(jsonMatch[0]);
+      let actions: GeminiAction[] = parsed.actions || [parsed];
+
+      const validActions = ['create_task', 'complete_task', 'list_tasks', 'update_task', 'ask_clarification', 'chat', 'query_location', 'suggest', 'unknown'];
+
+      actions = actions.map(a => ({
+        action: validActions.includes(a.action) ? a.action : 'unknown',
+        title: a.title || '',
+        taskNumber: a.taskNumber || null,
+        repeatType: a.repeatType || '',
+        repeatIntervalDays: a.repeatIntervalDays || null,
+        date: a.date || null,
+        time: a.time || null,
+        needsInterval: a.needsInterval || false,
+        isFlexible: a.isFlexible || false,
+        deadlineDays: a.deadlineDays || null,
+        location: a.location || null,
+        question: a.question || null,
+        reply: a.reply || null,
+      })) as GeminiAction[];
+
+      return { actions };
+    } catch (error: any) {
+      console.error('Gemini media parse error:', error.message);
+      return {
+        actions: [{
+          action: 'chat',
+          title: '',
+          taskNumber: null,
+          repeatType: '',
+          repeatIntervalDays: null,
+          date: null,
+          time: null,
+          needsInterval: false,
+          isFlexible: false,
+          deadlineDays: null,
+          location: null,
+          question: null,
+          reply: '⚠️ Medya analizi sırasında bir hata oluştu.',
+        }],
+      };
+    }
+  }
 }

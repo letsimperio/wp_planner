@@ -122,32 +122,40 @@ export class WhatsAppClientService {
 
     // Mesajları dinle
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
-      // Sadece notify: append = botun kendi gönderdiği mesajlar (echo) → atla
       if (type !== 'notify') return;
 
       for (const msg of messages) {
         try {
           const remoteJid = msg.key.remoteJid || '';
-          const text = msg.message?.conversation
-            || msg.message?.extendedTextMessage?.text
-            || '';
 
-          // Boş mesaj veya status/broadcast/grup atla
           if (!msg.message) continue;
           if (remoteJid === 'status@broadcast') continue;
           if (remoteJid.endsWith('@g.us')) continue;
-          if (!text || text.trim().length === 0) continue;
 
-          // Self-chat kontrolü: remoteJid kendi numara VEYA LID ile eşleşmeli
+          // Self-chat kontrolü
           const myNumber = WhatsAppClientService.myJid.split('@')[0];
           const myLidNumber = WhatsAppClientService.myLid.split('@')[0];
           const remoteNumber = remoteJid.split('@')[0];
           const isSelfChat = (myNumber === remoteNumber) || (myLidNumber && myLidNumber === remoteNumber);
           if (!isSelfChat) continue;
 
-          console.log(`📨 Mesaj: ${text}`);
-          // handleMessage'a gerçek telefon numarası geç (LID değil)
-          await WhatsAppClientService.handleMessage(remoteJid, text);
+          // Metin mesajı
+          const text = msg.message?.conversation
+            || msg.message?.extendedTextMessage?.text
+            || '';
+
+          // Resim mesajı
+          const imageMsg = msg.message?.imageMessage;
+          // Ses mesajı
+          const audioMsg = msg.message?.audioMessage;
+
+          if (imageMsg || audioMsg) {
+            console.log(`📎 Medya mesajı alındı: ${imageMsg ? 'resim' : 'ses'}`);
+            await WhatsAppClientService.handleMedia(remoteJid, msg, imageMsg ? 'image' : 'audio');
+          } else if (text && text.trim().length > 0) {
+            console.log(`📨 Mesaj: ${text}`);
+            await WhatsAppClientService.handleMessage(remoteJid, text);
+          }
         } catch (err: any) {
           console.error('❌ Mesaj işleme hatası:', err.message);
         }
@@ -178,11 +186,12 @@ export class WhatsAppClientService {
   // ==================== CONVERSATION & STATE ====================
 
   private static pendingTasks = new Map<string, {
-    type: 'interval' | 'clarification';
+    type: 'interval' | 'clarification' | 'media_confirmation';
     title: string;
     date: string | null;
     time: string | null;
-    dates?: string[];  // clarification: birden fazla tarih
+    dates?: string[];
+    proposedActions?: import('./gemini.service').GeminiAction[];  // medya onayı için
     userId: string;
     createdAt: number;
   }>();
@@ -237,6 +246,96 @@ export class WhatsAppClientService {
       console.log(`✅ WhatsApp mesajı gönderildi: ${phone}`);
     } catch (error: any) {
       console.error('❌ WhatsApp mesaj gönderilemedi:', error.message);
+    }
+  }
+
+  // ==================== MEDIA HANDLER ====================
+
+  private static async handleMedia(jid: string, msg: proto.IWebMessageInfo, mediaType: 'image' | 'audio'): Promise<void> {
+    try {
+      const phone = WhatsAppClientService.myJid.split('@')[0];
+
+      // Kullanıcıyı bul
+      const userData = await TaskService.findTasksByUserPhone(phone);
+      if (!userData) {
+        await WhatsAppClientService.reply(jid, phone, '❌ Bu numara kayıtlı değil.');
+        return;
+      }
+      const { user } = userData;
+
+      // "Analiz ediyorum" mesajı
+      if (sock) await sock.sendMessage(jid, { text: `🔍 _${mediaType === 'image' ? 'Resim' : 'Ses'} analiz ediliyor..._` });
+
+      // Medyayı indir
+      const { downloadMediaMessage } = await import('@whiskeysockets/baileys');
+      const buffer = await downloadMediaMessage(msg as any, 'buffer', {}) as Buffer;
+
+      if (!buffer || buffer.length === 0) {
+        await WhatsAppClientService.reply(jid, phone, '⚠️ Medya indirilemedi, lütfen tekrar gönderin.');
+        return;
+      }
+
+      console.log(`📥 Medya indirildi: ${buffer.length} byte (${mediaType})`);
+
+      // MIME type belirle
+      let mimeType: string;
+      if (mediaType === 'image') {
+        mimeType = msg.message?.imageMessage?.mimetype || 'image/jpeg';
+      } else {
+        mimeType = msg.message?.audioMessage?.mimetype || 'audio/ogg';
+        // Baileys ses mesajlarını ogg/opus olarak gönderir
+        if (mimeType.includes('codecs')) {
+          mimeType = 'audio/ogg';
+        }
+      }
+
+      // Caption (resim açıklaması)
+      const caption = msg.message?.imageMessage?.caption || '';
+
+      // Gemini'ye gönder
+      const response = await GeminiService.parseMedia(buffer, mimeType, user.geminiApiKey, caption);
+
+      // Chat action'ı varsa direkt gönder (görev çıkarılmadı)
+      const chatActions = response.actions.filter(a => a.action === 'chat');
+      if (chatActions.length > 0 && response.actions.length === chatActions.length) {
+        await WhatsAppClientService.reply(jid, phone, chatActions[0].reply || '❓ Bu medyadan görev çıkaramadım.');
+        return;
+      }
+
+      // Görev önerilerini sun
+      const taskActions = response.actions.filter(a => a.action === 'create_task');
+      if (taskActions.length === 0) {
+        await WhatsAppClientService.reply(jid, phone, '❓ Bu medyadan görev çıkaramadım. İçeriği yazıyla anlatır mısınız?');
+        return;
+      }
+
+      // Önerileri formatla
+      let preview = `📋 *${mediaType === 'image' ? 'Resimden' : 'Sesten'} ${taskActions.length} görev çıkardım:*\n\n`;
+      taskActions.forEach((t, i) => {
+        preview += `${i + 1}. *${t.title}*`;
+        if (t.date) preview += ` 📅 ${new Date(t.date).toLocaleDateString('tr-TR')}`;
+        if (t.time) preview += ` ⏰ ${t.time}`;
+        if (t.location) preview += ` 📍 ${t.location}`;
+        preview += '\n';
+      });
+      preview += '\n✅ Onaylıyor musunuz? (*evet* / *hayır* / *düzenle*)';
+
+      // Pending state'e kaydet
+      WhatsAppClientService.pendingTasks.set(phone, {
+        type: 'media_confirmation',
+        title: '',
+        date: null,
+        time: null,
+        proposedActions: taskActions,
+        userId: user.id,
+        createdAt: Date.now(),
+      });
+
+      await WhatsAppClientService.reply(jid, phone, preview);
+    } catch (error: any) {
+      console.error('❌ Medya işleme hatası:', error.message);
+      const phone = WhatsAppClientService.myJid.split('@')[0];
+      await WhatsAppClientService.reply(jid, phone, '⚠️ Medya işlenirken bir hata oluştu.');
     }
   }
 
@@ -316,6 +415,56 @@ export class WhatsAppClientService {
             return;
           }
           WhatsAppClientService.pendingTasks.delete(phone);
+        } else if (pending.type === 'media_confirmation') {
+          // Medya onay cevabı
+          const lower = text.toLowerCase().trim();
+
+          if (lower === 'evet' || lower === 'onay' || lower === 'e' || lower === 'tamam' || lower === 'onayla') {
+            // Tüm görevleri oluştur
+            const actions = pending.proposedActions || [];
+            const createdTasks: string[] = [];
+
+            for (const a of actions) {
+              const nextDueAt = a.date ? new Date(a.date) : undefined;
+              if (nextDueAt && a.time) {
+                const [h, m] = a.time.split(':').map(Number);
+                nextDueAt.setHours(h, m, 0, 0);
+              }
+              const task = await TaskService.create({
+                userId: pending.userId,
+                title: a.title,
+                repeatType: (a.repeatType as any) || 'ONCE',
+                nextDueAt: nextDueAt || undefined,
+              });
+              if (a.time || a.location) {
+                await prisma.task.update({
+                  where: { id: task.id },
+                  data: {
+                    ...(a.time ? { dueTime: a.time } : {}),
+                    ...(a.location ? { location: a.location } : {}),
+                  },
+                });
+              }
+              const dateStr = nextDueAt ? `📅 ${nextDueAt.toLocaleDateString('tr-TR')}` : '⏳ Zamansız';
+              createdTasks.push(`✅ ${a.title} — ${dateStr}${a.time ? ` ⏰${a.time}` : ''}${a.location ? ` 📍${a.location}` : ''}`);
+            }
+
+            let reply = `🎉 *${createdTasks.length} görev oluşturuldu!*\n\n`;
+            createdTasks.forEach(t => { reply += `${t}\n`; });
+            await WhatsAppClientService.reply(jid, phone, reply);
+            WhatsAppClientService.pendingTasks.delete(phone);
+            return;
+          } else if (lower === 'hayır' || lower === 'iptal' || lower === 'h' || lower === 'vazgeç') {
+            await WhatsAppClientService.reply(jid, phone, '❌ Görevler iptal edildi.');
+            WhatsAppClientService.pendingTasks.delete(phone);
+            return;
+          } else {
+            // Düzenleme veya başka bir cevap — ipucu ver
+            await WhatsAppClientService.reply(jid, phone,
+              '📝 Görevleri onaylamak için *evet*, iptal etmek için *hayır* yazın.\n\nFarklı görevler istiyorsanız medyayı tekrar gönderin veya yazıyla belirtin.'
+            );
+            return;
+          }
         }
       }
 
